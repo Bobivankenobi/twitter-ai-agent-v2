@@ -45,6 +45,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
 
         const text = await resp.text();
+        console.log('📩 BG received text:123', text);
         if (!resp.ok) {
           sendResponse({ ok: false, error: `Backend ${resp.status}: ${text}` });
           return;
