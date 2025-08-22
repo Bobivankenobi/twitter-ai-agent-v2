@@ -35,7 +35,7 @@ const panelStyle: React.CSSProperties = {
   bottom: "20px",
   right: "20px",
   width: 350,
-  height: "95%",
+  height: "65%",
   background: "#fff",
   border: "1px solid #ccc",
   borderRadius: 8,

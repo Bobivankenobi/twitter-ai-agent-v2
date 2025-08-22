@@ -38,7 +38,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
 
-        const resp = await fetch('http://localhost:4000/analyze', {
+        const resp = await fetch('http://localhost:4000/bulk-analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ screenshotBase64: base64 }),
