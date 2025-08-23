@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Spinner } from "./Spinner";
 import { candidatesSorted, circleCurrentArticle, gotoNext, jumpToArticle } from "../helpers/manualNavigationHelpers";
 import { CONFIG } from "../constants";
-import { sleep } from "../utils";
-import { captureAndAnalyzeOnce } from "../actions";
+import { sleep, waitFor } from "../utils";
+import { captureAndAnalyzeOnce, findTweetByText, pasteAndSubmitReply } from "../actions";
+import { getTweetActionButtons } from "../getters";
 
 type ChatRole = "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
@@ -17,6 +18,7 @@ export interface State {
   anySuccessThisRun: boolean;
   observer: MutationObserver | null;
   currentArticle: HTMLElement | null;
+  semiAuto: boolean;
 }
 
 const state: State = {
@@ -28,14 +30,15 @@ const state: State = {
   anySuccessThisRun: false,
   observer: null,
   currentArticle: null,
+  semiAuto: true,
 };
 
 const panelStyle: React.CSSProperties = {
   position: "fixed",
   bottom: "20px",
-  right: "20px",
+  right: "150px",
   width: 350,
-  height: "65%",
+  height: "85%",
   background: "#fff",
   border: "1px solid #ccc",
   borderRadius: 8,
@@ -66,6 +69,7 @@ const promptBoxStyle: React.CSSProperties = {
   borderRadius: 6,
   padding: "8px 10px",
   whiteSpace: "pre-wrap",
+  marginTop: 10,
 };
 
 const messagesStyle: React.CSSProperties = {
@@ -189,7 +193,7 @@ const sendBtnStyle: React.CSSProperties = {
   background: "#1DA1F2",
   color: "#fff",
   border: "none",
-  padding: "8px 12px",
+  padding: "6px 10px",
   borderRadius: 6,
   cursor: "pointer",
 } as const;
@@ -276,7 +280,6 @@ export default function CommentChat() {
 
       const resp = await captureAndAnalyzeOnce();
       const result = (resp as any)?.backend?.result ?? {};
-
       const post_kind = enumOr(result?.post_kind, ["original", "reply", "retweet", "quote", "ad"] as const, "original");
       const author_name = text(result?.author_name);
       const author_handle = text(result?.author_handle).startsWith("@")
@@ -367,20 +370,79 @@ export default function CommentChat() {
     suggested_reply,
     confidence,
   } = analyzedPostData as AnalyzedPost;
+  
+  async function waitForDialogClose(timeoutMs = 10000): Promise<boolean> {
+    const start = performance.now();
+    while (performance.now() - start < timeoutMs) {
+      const dialog = document.querySelector('div[role="dialog"]');
+      if (!dialog) return true;
+      await sleep(120);
+    }
+    return false;
+  }
 
-  const systemPrompt = useMemo(
-    () =>
-      `You are helping a user refine a Twitter comment.
+  async function engageTweet(article: HTMLElement, commentText: string): Promise<boolean> {
+    try {
+      const { replyBtn, likeBtn } = getTweetActionButtons(article);
+  
+      if (likeBtn && !likeBtn.matches('[data-testid="unlike"]')) {
+        (likeBtn as HTMLButtonElement).click();
+        await sleep(200);
+      }
+      if (!replyBtn) return false;
+  
+      (replyBtn as HTMLButtonElement).click();
+  
+      const dialog = await waitFor<HTMLElement | null>(() =>
+        document.querySelector("div[role='dialog']") as HTMLElement | null
+      );
+      if (!dialog) return false;
+  
+      await pasteAndSubmitReply(dialog, commentText);
+  
+      const closed = await waitForDialogClose(10000);
+      if (!closed) return false;
+  
+      await sleep(CONFIG.postCloseWaitMs);
+      return true;
+    } catch (e) {
+      console.error("❌ engageTweet failed:", e);
+      return false;
+    }
+  }
 
-System:
-• Keep replies casual, concise (<220 chars).
-• Ask clarifying questions if needed.
 
-Post content:
-${tweet_text || "Analyze the post and provide a comment suggestion."}
-`,
-    [tweet_text]
-  );
+  function handleAcceptSuggestion(text: string) {
+    const analyzed = analyzedPostData as AnalyzedPost;
+    const tweetText = analyzed?.tweet_text;
+    if (!tweetText) return alert("No analyzed tweet text found.");
+  
+    let hit = findTweetByText(tweetText, {
+      minScore: CONFIG.minMatchScore,
+      onlyViewport: true,
+    });
+  
+    if (!hit?.article?.isConnected) {
+      hit = findTweetByText(tweetText, {
+        minScore: CONFIG.minMatchScore,
+        onlyViewport: false,
+      });
+    }
+  
+    if (!hit?.article) {
+      return alert("Could not find matching tweet on page.");
+    }
+  
+    engageTweet(hit.article, text)
+      .then((ok) => {
+        if (!ok) alert("Failed to reply to tweet.");
+      })
+      .catch((err) => {
+        console.error("Error engaging tweet:", err);
+        alert("Something went wrong while replying.");
+      });
+  }
+
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -388,12 +450,13 @@ ${tweet_text || "Analyze the post and provide a comment suggestion."}
   const listRef = useRef<HTMLDivElement | null>(null);
 
   // Seed chat with a random suggested reply when analysis arrives
+  // this needs to be FIXED
   useEffect(() => {
     const s = (analyzedPostData as AnalyzedPost)?.suggested_reply;
     if (!s) return;
     const replies = [s.short, s.question, s.value_add].filter(Boolean) as string[];
     const randomReply = replies[Math.floor(Math.random() * replies.length)];
-    setMessages(randomReply ? [{ role: "assistant", content: randomReply }] : []);
+    setMessages(randomReply ? [{ role: "assistant", content: "Suggested comments not quite right? Let’s find a better one." }] : []);
     setInput("");
   }, [analyzedPostData]);
 
@@ -497,9 +560,85 @@ ${tweet_text || "Analyze the post and provide a comment suggestion."}
         {activeTab === "chat" ? (
           <>
             {/* System prompt (optional visibility) */}
-            <div style={{ padding: "10px 12px", borderBottom: "1px solid #eee" }}>
-              <div style={promptBoxStyle}>{systemPrompt}</div>
+            <div style={promptBoxStyle}>
+              <p style={{ marginTop: 5 }}>You are helping a user refine a Twitter comment.</p>
+
+              <p style={{ marginTop: 15 }}><i>System message:</i></p>
+              <ul style={{ paddingLeft: '20px', marginTop: 10 }}>
+                <li>Keep replies casual, concise (&lt;220 chars).</li>
+                <li>Ask clarifying questions if needed.</li>
+              </ul>
+
+              <p style={{ marginTop: 15 }}><i>Post content:</i></p>
+              <p><strong>{tweet_text || "Analyze the post and provide a comment suggestion."}</strong></p>
             </div>
+
+            {takeaway && (
+              <div style={{ marginTop: 16 }}>
+                <div style={labelStyle}>🔍 Takeaway</div>
+                <div
+                  style={{
+                    ...textBox,
+                    background: "#ecfeff",
+                    borderColor: "#bae6fd",
+                    fontSize: 13,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                  }}
+                >
+                  {takeaway}
+                </div>
+              </div>
+            )}
+
+            {/* Suggested Replies */}
+            {suggested_reply && (
+              <div style={{ marginTop: 16 }}>
+                <div style={labelStyle}>💡 Comment Suggestions</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}>
+                  {[
+                    { label: "Short", color: "#16a34a", bg: "#f0fdf4", text: suggested_reply.short },
+                    { label: "Question", color: "#0284c7", bg: "#f0f9ff", text: suggested_reply.question },
+                    { label: "Value Add", color: "#9333ea", bg: "#faf5ff", text: suggested_reply.value_add },
+                  ]
+                    .filter(({ text }) => text)
+                    .map(({ label, color, bg, text }) => (
+                      <div
+                        key={label}
+                        style={{
+                          background: bg,
+                          border: `1px solid ${color}20`,
+                          padding: "10px 12px", borderRadius: 8,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                        }}
+                      >
+                        <div style={{ fontWeight: "bold", fontSize: 12, color }}>{label}</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div style={{ fontSize: 13, maxWidth: "70%", lineHeight: 1.4 }}>{text}</div>
+                          <button
+                            onClick={() => handleAcceptSuggestion(text!)}
+                            style={{
+                              ...sendBtnStyle,
+                              background: color,
+                              fontSize: 11,
+                              height: "28px",
+                              padding: "4px 10px",
+                              borderRadius: 6,
+                              marginLeft: 8,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            ✅ Accept
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
 
             {/* Thread */}
             <div ref={listRef} style={messagesStyle} aria-live="polite">
@@ -507,6 +646,21 @@ ${tweet_text || "Analyze the post and provide a comment suggestion."}
                 <div key={i} style={{ marginBottom: 8 }}>
                   <strong style={{ marginRight: 6 }}>{m.role === "assistant" ? "GPT" : "You"}:</strong>
                   <span>{m.content}</span>
+                  {m.role === "assistant"  &&(       <button
+                            onClick={() => handleAcceptSuggestion(m.content!)}
+                            style={{
+                              ...sendBtnStyle,
+                              background: "#16a34a",
+                              fontSize: 11,
+                              height: "28px",
+                              padding: "4px 10px",
+                              borderRadius: 6,
+                              marginLeft: 8,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            ✅ Accept
+                          </button>)}
                 </div>
               ))}
               {loading && <div style={{ opacity: 0.6, fontStyle: "italic" }}>GPT is typing…</div>}

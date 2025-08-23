@@ -8,7 +8,7 @@ export const captureAndAnalyzeOnce = (): Promise<{ ok: boolean; error?: string; 
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(
       {
-        action: 'captureAndAnalyzeRaw',
+        action: 'captureAndAnalyzeRaw'
       },
       (resp) => {
         // Be resilient to undefined/extension errors

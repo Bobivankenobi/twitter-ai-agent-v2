@@ -11,17 +11,17 @@ chrome.runtime.onInstalled.addListener(() => {
 // Handle screenshot & analysis request
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log('📩 BG received message:', request);
-  if (request.action === 'runScroll') {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      chrome.tabs.sendMessage(tabs[0].id, { action: 'runScroll' });
-    });
-  }
+  // if (request.action === 'runScroll') {
+  //   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+  //     chrome.tabs.sendMessage(tabs[0].id, { action: 'runScroll' });
+  //   });
+  // }
 
-  if (request.action === 'stopScroll') {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      chrome.tabs.sendMessage(tabs[0].id, { action: 'stopScroll' });
-    });
-  }
+  // if (request.action === 'stopScroll') {
+  //   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+  //     chrome.tabs.sendMessage(tabs[0].id, { action: 'stopScroll' });
+  //   });
+  // }
 
   // 📸 NEW HANDLER — called from content.js for each tweet
   if (request.action === 'captureAndAnalyzeRaw') {
@@ -37,8 +37,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ ok: false, error: 'No base64 from capture' });
           return;
         }
-
-        const resp = await fetch('http://localhost:4000/bulk-analyze', {
+        
+        const resp = await fetch('http://localhost:4000/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ screenshotBase64: base64 }),

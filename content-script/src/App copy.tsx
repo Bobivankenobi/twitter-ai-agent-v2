@@ -284,7 +284,9 @@ function waitForNewTweetsWithTimeout(
   });
 }
 
-async function engageTweet(article: HTMLElement, commentText: string): Promise<boolean> {
+
+// extract this
+export async function engageTweet(article: HTMLElement, commentText: string): Promise<boolean> {
   try {
     const { replyBtn, likeBtn } = getTweetActionButtons(article);
 
