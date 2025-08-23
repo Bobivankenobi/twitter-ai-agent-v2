@@ -1,13 +1,70 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Spinner } from "./Spinner";
-import { candidatesSorted, circleCurrentArticle, gotoNext, jumpToArticle } from "../helpers/manualNavigationHelpers";
-import { CONFIG } from "../constants";
-import { sleep, waitFor } from "../utils";
-import { captureAndAnalyzeOnce, findTweetByText, pasteAndSubmitReply } from "../actions";
+import { candidatesSorted, circleCurrentArticle, gotoNext, jumpToArticle, scrollToAlignTop, waitUntilAligned } from "../helpers/manualNavigationHelpers";
+import { CONFIG, SELECTOR } from "../constants";
+import { isVisible, sleep, waitFor, waitForDialogClose } from "../utils";
+import { captureAndAnalyzeOnce, engageTweet, findTweetByText, pasteAndSubmitReply } from "../actions";
 import { getTweetActionButtons } from "../getters";
+import CommentApprovalOverlay from "./CommentApprovalOverlay";
+
 
 type ChatRole = "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
+
+
+
+// If you don't have chrome types installed, this prevents TS errors
+declare const chrome: any;
+
+
+export interface State {
+  stopped: boolean;
+  running: boolean;
+  repliedIds: Set<string>;
+  skippedIds: Set<string>;
+  attemptsById: Map<string, number>;
+  anySuccessThisRun: boolean;
+  observer: MutationObserver | null;
+  currentArticle: HTMLElement | null;
+  semiAuto: boolean; // NEW: require approve before submitting
+}
+
+
+interface FindTweetHit {
+  article: HTMLElement;
+  score: number;
+}
+
+
+
+export interface State {
+  stopped: boolean;
+  running: boolean;
+  repliedIds: Set<string>;
+  skippedIds: Set<string>;
+  attemptsById: Map<string, number>;
+  anySuccessThisRun: boolean;
+  observer: MutationObserver | null;
+  currentArticle: HTMLElement | null;
+}
+
+
+// const state: State = {
+//   stopped: false,
+//   running: false,
+//   repliedIds: new Set(),
+//   skippedIds: new Set(),
+//   attemptsById: new Map(),
+//   anySuccessThisRun: false,
+//   observer: null,
+//   currentArticle: null,
+//   semiAuto: true, // default ON; toggle with a button if you want
+// };
+
+
+type ApprovalResult = "approve" | "skip" | "stop";
+
+
 
 export interface State {
   stopped: boolean;
@@ -36,9 +93,9 @@ const state: State = {
 const panelStyle: React.CSSProperties = {
   position: "fixed",
   bottom: "20px",
-  right: "150px",
+  right: "10px",
   width: 350,
-  height: "85%",
+  height: "95%",
   background: "#fff",
   border: "1px solid #ccc",
   borderRadius: 8,
@@ -250,10 +307,324 @@ const enumOr = <T extends string>(v: unknown, allowed: readonly T[], fallback: T
   allowed.includes(v as T) ? (v as T) : fallback;
 
 export default function CommentChat() {
-  
+
+  //=================  STATE  ========================
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzedPostData, setAnalyzedPostData] = useState({});
   const [activeTab, setActiveTab] = useState<Tab>("chat");
+
+  const [_, setRenderToggle] = useState(false); // force re-render
+  const [approvalVisible, setApprovalVisible] = useState(false);
+  const [approvalInitialText, setApprovalInitialText] = useState("");
+  const approvalPromiseRef = useRef<(v: ApprovalResult) => void>();
+
+
+
+  //=================  HELPERS AUTO AND SEMI AUTO  ========================
+  async function submitReply(dialog: HTMLElement): Promise<boolean> {
+    const submitBtn =
+      dialog.querySelector('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]') as HTMLButtonElement | null;
+    if (!submitBtn) return false;
+    submitBtn.click();
+    return true;
+  }
+
+
+async function engageTweetSemiAuto(
+  article: HTMLElement,
+  commentText: string,
+  waitForApproval: (text: string) => Promise<ApprovalResult>
+): Promise<"posted" | "skipped" | "failed" | "stopped"> {
+  try {
+    const { replyBtn, likeBtn } = getTweetActionButtons(article);
+
+    // gentle like (optional)
+    if (likeBtn && !likeBtn.matches('[data-testid="unlike"]')) {
+      (likeBtn as HTMLButtonElement).click();
+      await sleep(150);
+    }
+    if (!replyBtn) return "failed";
+
+    (replyBtn as HTMLButtonElement).click();
+
+    const dialog = await waitFor<HTMLElement | null>(() =>
+      document.querySelector("div[role='dialog']") as HTMLElement | null
+    );
+    if (!dialog) return "failed";
+
+    // paste only (allow editing)
+    await pasteReplyOnly(dialog, (commentText || "").trim());
+
+    const userChoice = await waitForApproval(commentText || "");
+
+    if (userChoice === "stop") {
+      // close dialog without posting
+      (document.querySelector('div[role="dialog"] [aria-label="Close"]') as HTMLElement | null)?.click();
+      state.stopped = true;
+      return "stopped";
+    }
+    if (userChoice === "skip") {
+      (document.querySelector('div[role="dialog"] [aria-label="Close"]') as HTMLElement | null)?.click();
+      await sleep(150);
+      return "skipped";
+    }
+
+    // user approved -> submit
+    const okSubmit = await submitReply(dialog);
+    if (!okSubmit) return "failed";
+
+    const closed = await waitForDialogClose(10000);
+    if (!closed) return "failed";
+
+    await sleep(CONFIG.postCloseWaitMs);
+    return "posted";
+  } catch (e) {
+    console.error("❌ engageTweetSemiAuto failed:", e);
+    return "failed";
+  }
+}
+
+
+async function pasteReplyOnly(dialog: HTMLElement, text: string): Promise<boolean> {
+  if (!dialog) return false;
+  const editable =
+    (dialog.querySelector(
+      '[data-testid="tweetTextarea_0"] div[contenteditable="true"]'
+    ) as HTMLElement | null) ||
+    (dialog.querySelector('div[role="textbox"][contenteditable="true"]') as HTMLElement | null);
+  if (!editable) return false;
+  editable.focus();
+  try {
+    document.execCommand("insertText", false, text || "");
+  } catch {
+    editable.textContent = text || "";
+    editable.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  }
+  return true;
+}
+
+
+function loadRepliedFromStorage(): void {
+  try {
+    const raw = localStorage.getItem(CONFIG.persistKey);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) arr.forEach((id) => state.repliedIds.add(id));
+  } catch {
+    /* empty */
+  }
+}
+
+
+function saveRepliedToStorage(): void {
+  try {
+    localStorage.setItem(
+      CONFIG.persistKey,
+      JSON.stringify([...state.repliedIds])
+    );
+  } catch {
+    /* empty */
+  }
+}
+
+function getTweetId(article: HTMLElement): string {
+  const link = article.querySelector('a[href*="/status/"]') as HTMLAnchorElement | null;
+  const match = link?.getAttribute("href")?.match(/\/status\/(\d+)/);
+  if (match) return match[1];
+  const user = (article.querySelector('[data-testid="User-Name"] a') as HTMLElement | null)?.textContent || "";
+  const time =
+    (article.querySelector("time") as HTMLElement | null)?.getAttribute("datetime") || "";
+  const text =
+    (article.querySelector('[data-testid="tweetText"]') as HTMLElement | null)?.innerText ||
+    "";
+  return `${user}|${time}|${text.slice(0, 30)}`;
+}
+
+function nextCandidateBelowViewport(): HTMLElement | null {
+  const all = Array.from(document.querySelectorAll<HTMLElement>(SELECTOR));
+  for (const a of all) {
+    if (!isVisible(a)) continue;
+    if (a.getBoundingClientRect().top <= 0) continue;
+    const id = getTweetId(a);
+    if (state.repliedIds.has(id)) continue;
+    if (state.skippedIds.has(id)) continue;
+    if (a.dataset.engaged === "1" || a.dataset.skipped === "1") continue;
+    return a;
+  }
+  return null;
+}
+
+
+function waitForNewTweetsWithTimeout(
+  timeoutMs: number = CONFIG.mutationTimeoutMs
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false;
+    const markDone = (val: boolean) => {
+      if (!done) {
+        done = true;
+        try {
+          state.observer?.disconnect();
+        } catch {
+          /* empty */
+        }
+        resolve(val);
+      }
+    };
+    state.observer = new MutationObserver(() => markDone(true));
+    state.observer.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => markDone(false), timeoutMs);
+  });
+}
+
+
+
+function bumpAttempt(id: string, article?: HTMLElement | null): void {
+  const n = (state.attemptsById.get(id) || 0) + 1;
+  state.attemptsById.set(id, n);
+  if (n >= CONFIG.maxAttemptsPerTweet) {
+    state.skippedIds.add(id);
+    if (article?.dataset) article.dataset.skipped = "1";
+    console.log("⏭️ Skipping stubborn tweet:", id);
+  }
+}
+
+function waitForApproval(initial: string): Promise<ApprovalResult> {
+  setApprovalVisible(true);
+  setApprovalInitialText(initial);
+  return new Promise<ApprovalResult>((resolve) => {
+    approvalPromiseRef.current = resolve;
+  });
+}
+//=================  HELPERS  ========================
+
+async function run(): Promise<void> {
+  if (state.running) return;
+  state.running = true;
+  state.stopped = false;
+  state.anySuccessThisRun = false;
+  loadRepliedFromStorage();
+
+  console.log("▶️ Twitter AI Agent started");
+
+  while (!state.stopped) {
+    try {
+      // Find next candidate already loaded on the page
+      let article = nextCandidateBelowViewport();
+
+      // If no candidate AND we had at least one success, load more by nudging down once
+      if (!article && state.anySuccessThisRun) {
+        window.scrollBy({
+          top: Math.floor(window.innerHeight * CONFIG.scrollAdvanceRatio),
+          behavior: "smooth",
+        });
+        await waitForNewTweetsWithTimeout();
+        await sleep(300);
+        article = nextCandidateBelowViewport();
+        if (!article) {
+          await sleep(500);
+          continue;
+        }
+      }
+
+      if (!article) {
+        await sleep(400);
+        continue;
+      }
+
+      // Align candidate
+      scrollToAlignTop(article);
+      await waitUntilAligned(article, CONFIG.alignTolerancePx, CONFIG.alignMaxWaitMs, state);
+      await sleep(150);
+
+      // Screenshot + analyze
+      const startedAt = Date.now();
+      const resp = await captureAndAnalyzeOnce();
+      const tookMs = Date.now() - startedAt;
+      console.log(`🧾 Capture+analyze took ${tookMs}ms`, resp);
+      console.log("resp?.backend?.result", resp?.backend?.result);
+      const aiContent = (resp as any)?.backend?.result?.tweet_text as string | undefined;
+      const aiReplyArray = (resp as any)?.backend?.result?.suggested_reply
+      const aiReply = aiReplyArray?.short
+
+      const id = getTweetId(article);
+
+      if (!aiContent) {
+        bumpAttempt(id, article);
+        await sleep(200);
+        continue;
+      }
+
+      // Try to match in viewport; if none, try a small fallback (allow off-viewport search)
+      let hit = (findTweetByText(aiContent, {
+        minScore: CONFIG.minMatchScore,
+        onlyViewport: true,
+      }) as FindTweetHit | null) as FindTweetHit | null;
+
+      if (!hit?.article?.isConnected) {
+        hit = (findTweetByText(aiContent, {
+          minScore: CONFIG.minMatchScore,
+          onlyViewport: false,
+        }) as FindTweetHit | null) as FindTweetHit | null;
+      }
+      if (!hit?.article?.isConnected) {
+        console.log("⚠️ No tweet matched the AI snippet in viewport.");
+        bumpAttempt(id, article);
+        await sleep(250);
+        continue;
+      }
+
+      const targetId = getTweetId(hit.article);
+      if (state.repliedIds.has(targetId)) {
+        hit.article.dataset.engaged = "1";
+        continue;
+      }
+
+      const modeResult = state.semiAuto
+        ? await engageTweetSemiAuto(hit.article, aiReply || "", waitForApproval)
+        : (await engageTweet(hit.article, aiReply || "")) ? "posted" : "failed";
+
+     if (modeResult === "posted") {
+       state.repliedIds.add(targetId);
+       state.anySuccessThisRun = true;
+       hit.article.dataset.engaged = "1";
+       saveRepliedToStorage();
+
+       window.scrollBy({
+         top: Math.floor(window.innerHeight * CONFIG.scrollAdvanceRatio),
+         behavior: "smooth",
+       });
+       await sleep(700);
+       continue;
+     } else if (modeResult === "skipped") {
+       state.skippedIds.add(targetId);
+       hit.article.dataset.skipped = "1";
+       await sleep(250);
+       continue;
+     } else if (modeResult === "stopped") {
+       break; // exit run loop gracefully
+     } else {
+       bumpAttempt(targetId, hit.article);
+       await sleep(250);
+     }
+    } catch (err) {
+      console.error("Loop error:", err);
+      await sleep(500);
+    }
+  }
+
+  try {
+    state.observer?.disconnect();
+  } catch {
+    /* empty */
+  }
+  state.observer = null;
+  state.running = false;
+  console.log("⏹️ Twitter AI Agent stopped");
+
+}
+  //=================  HELPERS AUTO AND SEMI AUTO  ========================
+
 
   async function gotoPrev(): Promise<void> {
     circleCurrentArticle();
@@ -371,46 +742,6 @@ export default function CommentChat() {
     confidence,
   } = analyzedPostData as AnalyzedPost;
   
-  async function waitForDialogClose(timeoutMs = 10000): Promise<boolean> {
-    const start = performance.now();
-    while (performance.now() - start < timeoutMs) {
-      const dialog = document.querySelector('div[role="dialog"]');
-      if (!dialog) return true;
-      await sleep(120);
-    }
-    return false;
-  }
-
-  async function engageTweet(article: HTMLElement, commentText: string): Promise<boolean> {
-    try {
-      const { replyBtn, likeBtn } = getTweetActionButtons(article);
-  
-      if (likeBtn && !likeBtn.matches('[data-testid="unlike"]')) {
-        (likeBtn as HTMLButtonElement).click();
-        await sleep(200);
-      }
-      if (!replyBtn) return false;
-  
-      (replyBtn as HTMLButtonElement).click();
-  
-      const dialog = await waitFor<HTMLElement | null>(() =>
-        document.querySelector("div[role='dialog']") as HTMLElement | null
-      );
-      if (!dialog) return false;
-  
-      await pasteAndSubmitReply(dialog, commentText);
-  
-      const closed = await waitForDialogClose(10000);
-      if (!closed) return false;
-  
-      await sleep(CONFIG.postCloseWaitMs);
-      return true;
-    } catch (e) {
-      console.error("❌ engageTweet failed:", e);
-      return false;
-    }
-  }
-
 
   function handleAcceptSuggestion(text: string) {
     const analyzed = analyzedPostData as AnalyzedPost;
@@ -510,6 +841,7 @@ export default function CommentChat() {
         <strong>Comment Assistant</strong>
       </div>
 
+
       {/* Controls */}
       <div style={controlsRow}>
         <button
@@ -537,8 +869,65 @@ export default function CommentChat() {
           <span>Analyze</span>
           {isAnalyzing && <Spinner />}
         </button>
+       
       </div>
+<div>
+         {/* ==================  UI AUTO AND SEMI AUTO  ======================== */}
+         <div>
 
+{/* Toggle Semi-auto */}
+<button
+  onClick={() => {
+    state.semiAuto = !state.semiAuto;
+    setRenderToggle((v) => !v); // force re-render
+  }}
+  className={`p-2.5 rounded-md shadow-md text-white border-none cursor-pointer ${
+    state.semiAuto ? "bg-emerald-500" : "bg-slate-500"
+  }`}
+>
+  Semi-auto: {state.semiAuto ? "ON" : "OFF"}
+</button>
+
+{/* Run Button */}
+<button
+  onClick={() => run()}
+  id="twitter-agent-btn-start"
+  className="p-2.5 rounded-md shadow-md text-white border-none cursor-pointer bg-[#1DA1F2]"
+>
+  Run
+</button>
+
+{/* Stop Button */}
+<button
+  onClick={() => {
+    state.stopped = true;
+  }}
+  id="twitter-agent-btn-stop"
+  className="p-2.5 rounded-md shadow-md text-white border-none cursor-pointer bg-[#e11d48]"
+>
+  Stop
+</button>
+</div>
+
+{/* ==================  UI AUTO AND SEMI AUTO  ======================== */}
+{approvalVisible && (
+        <CommentApprovalOverlay
+          initial={approvalInitialText}
+        onApprove={() => {
+            approvalPromiseRef.current?.("approve");
+            setApprovalVisible(false);
+          }}
+          onSkip={() => {
+            approvalPromiseRef.current?.("skip");
+            setApprovalVisible(false);
+          }}
+          onStop={() => {
+            approvalPromiseRef.current?.("stop");
+            setApprovalVisible(false);
+          }}
+        />
+      )}
+</div>
       {/* Tabs */}
       <div style={tabBarStyle}>
         <button

@@ -1,6 +1,7 @@
 import { sleep } from "../utils";
 import { CONFIG, OFFSET_TOP_PX, SELECTOR } from "../constants";
-import { State } from "../App";
+import { State } from "../components/CommentChat";
+
 
 
 export const scrollToAlignTop = (el: HTMLElement): void => {

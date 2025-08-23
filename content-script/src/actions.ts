@@ -1,5 +1,7 @@
 // Assuming './utils' exports these functions
-import { isVisible, overlapScore, sleep, toTokenSet, waitFor } from './utils';
+import { CONFIG } from './constants';
+import { getTweetActionButtons } from './getters';
+import { isVisible, overlapScore, sleep, toTokenSet, waitFor, waitForDialogClose } from './utils';
 
 // Defines a function named captureAndAnalyzeOnce
 // its job is to request a screenshot capture from the background script,
@@ -155,3 +157,33 @@ export const findTweetByText = (snippet: string, { minScore = 0.5, onlyViewport 
   }
   return best;
 };
+
+export async function engageTweet(article: HTMLElement, commentText: string): Promise<boolean> {
+  try {
+    const { replyBtn, likeBtn } = getTweetActionButtons(article);
+
+    if (likeBtn && !likeBtn.matches('[data-testid="unlike"]')) {
+      (likeBtn as HTMLButtonElement).click();
+      await sleep(200);
+    }
+    if (!replyBtn) return false;
+
+    (replyBtn as HTMLButtonElement).click();
+
+    const dialog = await waitFor<HTMLElement | null>(() =>
+      document.querySelector("div[role='dialog']") as HTMLElement | null
+    );
+    if (!dialog) return false;
+
+    await pasteAndSubmitReply(dialog, commentText);
+
+    const closed = await waitForDialogClose(10000);
+    if (!closed) return false;
+
+    await sleep(CONFIG.postCloseWaitMs);
+    return true;
+  } catch (e) {
+    console.error("❌ engageTweet failed:", e);
+    return false;
+  }
+}

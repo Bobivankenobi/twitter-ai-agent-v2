@@ -108,3 +108,13 @@ export const overlapScore = (needles: Set<string>, haystack: Set<string>): numbe
   // Use Math.max(1, needles.size) to avoid dividing by zero
   return hits / Math.max(1, needles.size);
 };
+
+export async function waitForDialogClose(timeoutMs = 10000): Promise<boolean> {
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
+    const dialog = document.querySelector('div[role="dialog"]');
+    if (!dialog) return true;
+    await sleep(120);
+  }
+  return false;
+}
