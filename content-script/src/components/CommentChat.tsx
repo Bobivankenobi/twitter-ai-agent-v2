@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Spinner } from "./Spinner";
 import { candidatesSorted, circleCurrentArticle, gotoNext, jumpToArticle, scrollToAlignTop, waitUntilAligned } from "../helpers/manualNavigationHelpers";
 import { CONFIG, SELECTOR } from "../constants";
-import { isVisible, sleep, waitFor, waitForDialogClose } from "../utils";
-import { captureAndAnalyzeOnce, engageTweet, findTweetByText, pasteAndSubmitReply } from "../actions";
+import { isVisible, sleep} from "../utils";
+import { captureAndAnalyzeOnce, engageTweet, findTweetByText } from "../actions";
 import { getTweetActionButtons } from "../getters";
 import CommentApprovalOverlay from "./CommentApprovalOverlay";
 
@@ -14,7 +14,7 @@ type ChatMessage = { role: ChatRole; content: string };
 
 
 // If you don't have chrome types installed, this prevents TS errors
-declare const chrome: any;
+// declare const chrome: any;
 
 
 export interface State {
@@ -181,7 +181,9 @@ export type AnalyzedPost = {
 };
 
 // UI helpers
-const badge = (bg: string, txt: string): React.CSSProperties => ({
+const badge = (bg: string, txt: string): React.CSSProperties => {
+console.log("txt",txt)
+return {
   display: "inline-block",
   padding: "2px 8px",
   borderRadius: 999,
@@ -191,7 +193,8 @@ const badge = (bg: string, txt: string): React.CSSProperties => ({
   background: bg,
   lineHeight: 1.6,
   marginRight: 6,
-});
+}
+} 
 
 const sectionStyle: React.CSSProperties = {
   padding: "10px 12px",
@@ -313,21 +316,21 @@ export default function CommentChat() {
   const [analyzedPostData, setAnalyzedPostData] = useState({});
   const [activeTab, setActiveTab] = useState<Tab>("chat");
 
-  const [_, setRenderToggle] = useState(false); // force re-render
+  const [renderToggle, setRenderToggle] = useState(false); // force re-render
   const [approvalVisible, setApprovalVisible] = useState(false);
   const [approvalInitialText, setApprovalInitialText] = useState("");
   const approvalPromiseRef = useRef<(v: ApprovalResult) => void>();
-
+console.log("renderToggle", renderToggle)
 
 
   //=================  HELPERS AUTO AND SEMI AUTO  ========================
-  async function submitReply(dialog: HTMLElement): Promise<boolean> {
-    const submitBtn =
-      dialog.querySelector('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]') as HTMLButtonElement | null;
-    if (!submitBtn) return false;
-    submitBtn.click();
-    return true;
-  }
+  // async function submitReply(dialog: HTMLElement): Promise<boolean> {
+  //   const submitBtn =
+  //     dialog.querySelector('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]') as HTMLButtonElement | null;
+  //   if (!submitBtn) return false;
+  //   submitBtn.click();
+  //   return true;
+  // }
 
 
 async function engageTweetSemiAuto(
@@ -345,15 +348,15 @@ async function engageTweetSemiAuto(
     }
     if (!replyBtn) return "failed";
 
-    (replyBtn as HTMLButtonElement).click();
+    // (replyBtn as HTMLButtonElement).click();
 
-    const dialog = await waitFor<HTMLElement | null>(() =>
-      document.querySelector("div[role='dialog']") as HTMLElement | null
-    );
-    if (!dialog) return "failed";
+    // const dialog = await waitFor<HTMLElement | null>(() =>
+    //   document.querySelector("div[role='dialog']") as HTMLElement | null
+    // );
+    // if (!dialog) return "failed";
 
     // paste only (allow editing)
-    await pasteReplyOnly(dialog, (commentText || "").trim());
+    // await pasteReplyOnly(dialog, (commentText || "").trim());
 
     const userChoice = await waitForApproval(commentText || "");
 
@@ -370,13 +373,14 @@ async function engageTweetSemiAuto(
     }
 
     // user approved -> submit
-    const okSubmit = await submitReply(dialog);
-    if (!okSubmit) return "failed";
+    // const okSubmit = await submitReply(dialog);
+    // if (!okSubmit) return "failed";
 
-    const closed = await waitForDialogClose(10000);
-    if (!closed) return "failed";
+    // const closed = await waitForDialogClose(10000);
+    // if (!closed) return "failed";
 
     await sleep(CONFIG.postCloseWaitMs);
+    console.log("posted");
     return "posted";
   } catch (e) {
     console.error("❌ engageTweetSemiAuto failed:", e);
@@ -385,23 +389,23 @@ async function engageTweetSemiAuto(
 }
 
 
-async function pasteReplyOnly(dialog: HTMLElement, text: string): Promise<boolean> {
-  if (!dialog) return false;
-  const editable =
-    (dialog.querySelector(
-      '[data-testid="tweetTextarea_0"] div[contenteditable="true"]'
-    ) as HTMLElement | null) ||
-    (dialog.querySelector('div[role="textbox"][contenteditable="true"]') as HTMLElement | null);
-  if (!editable) return false;
-  editable.focus();
-  try {
-    document.execCommand("insertText", false, text || "");
-  } catch {
-    editable.textContent = text || "";
-    editable.dispatchEvent(new InputEvent("input", { bubbles: true }));
-  }
-  return true;
-}
+// async function pasteReplyOnly(dialog: HTMLElement, text: string): Promise<boolean> {
+//   if (!dialog) return false;
+//   const editable =
+//     (dialog.querySelector(
+//       '[data-testid="tweetTextarea_0"] div[contenteditable="true"]'
+//     ) as HTMLElement | null) ||
+//     (dialog.querySelector('div[role="textbox"][contenteditable="true"]') as HTMLElement | null);
+//   if (!editable) return false;
+//   editable.focus();
+//   try {
+//     document.execCommand("insertText", false, text || "");
+//   } catch {
+//     editable.textContent = text || "";
+//     editable.dispatchEvent(new InputEvent("input", { bubbles: true }));
+//   }
+//   return true;
+// }
 
 
 function loadRepliedFromStorage(): void {
@@ -453,6 +457,67 @@ function nextCandidateBelowViewport(): HTMLElement | null {
   }
   return null;
 }
+
+function toAnalyzedPost(result: { tweet_text: unknown; content: unknown; takeaway: unknown; post_kind: unknown; language: unknown; author_name: unknown; author_handle: unknown; media_description: unknown; media_summary: unknown; image_text: unknown; relationships: unknown; hidden_or_subtext: unknown; author_intent: unknown; author_tone: unknown; audience: unknown; context_or_background: unknown; why_now: unknown; risks_to_avoid: unknown; key_ideas: unknown[]; conversation_hooks: unknown[]; suggested_reply: { short: unknown; question: unknown; value_add: unknown; }; confidence: unknown; }): AnalyzedPost {
+  const tweet_text_raw = text(result?.tweet_text) || text(result?.content) || "";
+  const takeaway_raw = text(result?.takeaway);
+
+  return {
+    post_kind: enumOr(result?.post_kind, ["original", "reply", "retweet", "quote", "ad"] as const, "original"),
+    is_truncated: inferTruncated(tweet_text_raw),
+    language: orNull(result?.language),
+
+    author_name: text(result?.author_name),
+    author_handle: text(result?.author_handle).startsWith("@")
+      ? text(result?.author_handle)
+      : text(result?.author_name)
+      ? `@${text(result?.author_handle)}`
+      : text(result?.author_handle) || "",
+
+    tweet_text: tweet_text_raw,
+
+    media_description: text(result?.media_description) || text(result?.media_summary) || "",
+    image_text: text(result?.image_text) || "none",
+
+    relationships: orNone(result?.relationships),
+    hidden_or_subtext: orNone(result?.hidden_or_subtext),
+
+    author_intent: text(result?.author_intent),
+    author_tone: text(result?.author_tone),
+
+    audience: orNone(result?.audience),
+    context_or_background: orNone(result?.context_or_background),
+    why_now: text(result?.why_now) || "unclear",
+    risks_to_avoid: orNone(result?.risks_to_avoid),
+
+    takeaway: takeaway_raw.startsWith("✅ In short")
+      ? takeaway_raw
+      : `✅ In short ${takeaway_raw}`.replace(/\s+/g, " ").trim(),
+
+    key_ideas: Array.isArray(result?.key_ideas)
+      ? result.key_ideas.map(text).filter(Boolean).slice(0, 3)
+      : [],
+
+    conversation_hooks: Array.isArray(result?.conversation_hooks)
+      ? result.conversation_hooks.map(text).filter(Boolean).slice(0, 3)
+      : [],
+
+    suggested_reply: {
+      short: text(result?.suggested_reply?.short).slice(0, 120),
+      question: text(result?.suggested_reply?.question),
+      value_add: text(result?.suggested_reply?.value_add),
+    },
+
+    confidence: enumOr(result?.confidence, ["low", "medium", "high"] as const, "medium"),
+  };
+}
+
+function extractTweetText(article: HTMLElement): string {
+  const el = article.querySelector('[data-testid="tweetText"]') as HTMLElement | null;
+  if (!el) return "";
+  return (el.innerText || "").replace(/\s+/g, " ").trim();
+}
+
 
 
 function waitForNewTweetsWithTimeout(
@@ -543,9 +608,16 @@ async function run(): Promise<void> {
       const tookMs = Date.now() - startedAt;
       console.log(`🧾 Capture+analyze took ${tookMs}ms`, resp);
       console.log("resp?.backend?.result", resp?.backend?.result);
-      const aiContent = (resp as any)?.backend?.result?.tweet_text as string | undefined;
-      const aiReplyArray = (resp as any)?.backend?.result?.suggested_reply
+      const aiContent = (resp)?.backend?.result?.tweet_text as string | undefined;
+      const aiReplyArray = (resp)?.backend?.result?.suggested_reply
       const aiReply = aiReplyArray?.short
+
+      //---------
+      const result = (resp)?.backend?.result ?? {};
+      const structured = toAnalyzedPost(result);
+      setAnalyzedPostData(structured);
+      setActiveTab("chat");
+      //---------
 
       const id = getTweetId(article);
 
@@ -589,7 +661,8 @@ async function run(): Promise<void> {
        state.anySuccessThisRun = true;
        hit.article.dataset.engaged = "1";
        saveRepliedToStorage();
-
+      console.log("scrolling");
+      await sleep(700);
        window.scrollBy({
          top: Math.floor(window.innerHeight * CONFIG.scrollAdvanceRatio),
          behavior: "smooth",
@@ -650,7 +723,7 @@ async function run(): Promise<void> {
       await sleep(120);
 
       const resp = await captureAndAnalyzeOnce();
-      const result = (resp as any)?.backend?.result ?? {};
+      const result = (resp)?.backend?.result ?? {};
       const post_kind = enumOr(result?.post_kind, ["original", "reply", "retweet", "quote", "ad"] as const, "original");
       const author_name = text(result?.author_name);
       const author_handle = text(result?.author_handle).startsWith("@")
@@ -763,9 +836,13 @@ async function run(): Promise<void> {
     if (!hit?.article) {
       return alert("Could not find matching tweet on page.");
     }
-  
+    // // TODO CHECK THIS
+    // approvalPromiseRef.current?.("approve");
+    // setApprovalVisible(false);
     engageTweet(hit.article, text)
       .then((ok) => {
+        approvalPromiseRef.current?.("approve");
+        setApprovalVisible(false);
         if (!ok) alert("Failed to reply to tweet.");
       })
       .catch((err) => {
@@ -790,6 +867,139 @@ async function run(): Promise<void> {
     setMessages(randomReply ? [{ role: "assistant", content: "Suggested comments not quite right? Let’s find a better one." }] : []);
     setInput("");
   }, [analyzedPostData]);
+
+
+  const ANALYZE_BTN_CLASS = "ca-analyze-btn";
+
+// function attachAnalyzeButtonToArticle(
+//   article: HTMLElement,
+//   analyzeCurrentPost: () => Promise<void>
+// ) {
+//   // avoid duplicates
+//   if (article.querySelector(`.${ANALYZE_BTN_CLASS}`)) return;
+
+//   // try to mount near the action row (reply/retweet/like group)
+//   const actionRow =
+//     article.querySelector('div[role="group"]') || // common container
+//     article.querySelector('[data-testid="reply"]')?.parentElement?.parentElement;
+
+//   if (!actionRow) return;
+
+//   const btn = document.createElement("button");
+//   btn.textContent = "Analyze";
+//   btn.className = ANALYZE_BTN_CLASS;
+//   Object.assign(btn.style, {
+//     marginLeft: "8px",
+//     padding: "6px 10px",
+//     border: "1px solid rgba(29,155,240,0.4)",
+//     background: "rgba(29,155,240,0.15)",
+//     color: "#E7E9EA",
+//     borderRadius: "8px",
+//     cursor: "pointer",
+//     fontSize: "12px",
+//   } as CSSStyleDeclaration);
+
+//   btn.addEventListener("click", async (e) => {
+//     e.preventDefault();
+//     e.stopPropagation();
+//     // Make this article the current one, align it, then analyze
+//     state.currentArticle = article;
+//     await jumpToArticle(article, CONFIG.alignTolerancePx, CONFIG.alignMaxWaitMs, state);
+//     await analyzeCurrentPost();
+//   });
+
+//   actionRow.appendChild(btn);
+// }
+
+function attachAnalyzeButtonToArticle(
+  article: HTMLElement,
+  setInputCb: (v: string) => void,
+  setActiveTabCb: (tab: Tab) => void,
+  // analyzeCurrentPost: () => Promise<void>
+) {
+  if (article.querySelector(`.${ANALYZE_BTN_CLASS}`)) return;
+
+  const actionRow =
+    article.querySelector('div[role="group"]') ||
+    article.querySelector('[data-testid="reply"]')?.parentElement?.parentElement;
+  if (!actionRow) return;
+
+  const btn = document.createElement("button");
+  btn.textContent = "Analyze";
+  btn.className = ANALYZE_BTN_CLASS;
+  Object.assign(btn.style, {
+    marginLeft: "8px",
+    padding: "6px 10px",
+    border: "1px solid rgba(29,155,240,0.4)",
+    background: "rgba(29,155,240,0.15)",
+    color: "#E7E9EA",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "12px",
+  } as CSSStyleDeclaration);
+
+  btn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    state.currentArticle = article;
+
+    // 1) grab tweet text and seed the chat input
+    const tweetText = extractTweetText(article);
+    if (tweetText) {
+      setActiveTabCb("chat");
+      setInputCb(`create comment for this post:\n${tweetText}`);
+    }
+
+    // 2) (optional) still run your analysis pipeline
+    // await analyzeCurrentPost();
+  });
+
+  actionRow.appendChild(btn);
+}
+
+
+function isInViewport(el: HTMLElement) {
+  const r = el.getBoundingClientRect();
+  return r.bottom > 0 && r.top < window.innerHeight;
+}
+
+function attachButtonsToVisibleTweets(
+  setInputCb: (v: string) => void,
+  setActiveTabCb: (tab: Tab) => void,
+  // analyzeCurrentPost: () => Promise<void>
+) {
+  // analyzeCurrentPost
+  const articles = document.querySelectorAll<HTMLElement>(SELECTOR);
+  articles.forEach((a) => {
+    if (!isVisible(a)) return;
+    if (!isInViewport(a)) return;
+    attachAnalyzeButtonToArticle(a, setInputCb, setActiveTabCb);
+  });
+}
+
+
+useEffect(() => {
+  // analyzeCurrentPost
+  attachButtonsToVisibleTweets(setInput, setActiveTab);
+
+  const mo = new MutationObserver(() => {
+    // analyzeCurrentPost
+    requestAnimationFrame(() =>
+      attachButtonsToVisibleTweets(setInput, setActiveTab)
+    );
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+  // analyzeCurrentPost
+  const onScroll = () => attachButtonsToVisibleTweets(setInput, setActiveTab);
+  window.addEventListener("scroll", onScroll, { passive: true });
+
+  return () => {
+    mo.disconnect();
+    window.removeEventListener("scroll", onScroll);
+  };
+}, []);
+
 
   // autoscroll chat
   useEffect(() => {

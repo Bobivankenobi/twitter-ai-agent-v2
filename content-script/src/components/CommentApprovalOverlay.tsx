@@ -27,7 +27,7 @@ export default function CommentApprovalOverlay({ initial, onApprove, onSkip, onS
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-        <button
+        {/* <button
           onClick={onApprove}
           style={{
             flex: 1,
@@ -40,7 +40,7 @@ export default function CommentApprovalOverlay({ initial, onApprove, onSkip, onS
           }}
         >
           approve (ctrl/⌘+enter)
-        </button>
+        </button> */}
         <button
           onClick={onSkip}
           style={{
