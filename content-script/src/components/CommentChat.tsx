@@ -22,28 +22,30 @@ import {
   State,
   Tab,
 } from "../types";
-import { badge, enumOr, inferTruncated, orNone, orNull, text } from "../helpers/uiHelpers";
+import { enumOr, inferTruncated, orNone, orNull, text } from "../helpers/uiHelpers";
+import { ArrowButton, ToggleSwitch, ChatTextarea } from "./ui";
+import { useCallback } from "react";
 import {
+  btnArrow,
+  btnGroup,
   contentScroll,
   controlsRow,
-  headerRow,
   headerStyle,
+  hintStyle,
   inputRowStyle,
   inputStyle,
   labelStyle,
-  listStyle,
   messagesStyle,
   panelStyle,
-  pillStyle,
   promptBoxStyle,
-  sectionStyle,
   sendBtnStyle,
-  subtle,
   tabBarStyle,
   tabBtn,
   tabBtnActive,
   textBox,
 } from "../styles";
+import { btnInfo, btnPrimary, btnDanger, headerTitle } from "../styles";
+import PostAnalysis from "./PostAnalysis";
 
 const state: State = {
   stopped: false,
@@ -54,22 +56,40 @@ const state: State = {
   anySuccessThisRun: false,
   observer: null,
   currentArticle: null,
-  semiAuto: true,
+  semiAuto: false,
 };
 
 export default function CommentChat() {
-  //=================  STATE  ========================
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzedPostData, setAnalyzedPostData] = useState({});
   const [activeTab, setActiveTab] = useState<Tab>("chat");
 
-  const [renderToggle, setRenderToggle] = useState(false); // force re-render
+  const [renderToggle, setRenderToggle] = useState(false);
   const [approvalVisible, setApprovalVisible] = useState(false);
   const [approvalInitialText, setApprovalInitialText] = useState("");
   const approvalPromiseRef = useRef<(v: ApprovalResult) => void>();
   console.log("renderToggle", renderToggle);
 
-  //=================  HELPERS AUTO AND SEMI AUTO  ========================
+  // const handlePrev = useCallback(() => {
+  //   void gotoPrev();
+  // }, []);
+  // const handleNext = useCallback(() => {
+  //   void gotoNextPost();
+  // }, []);
+  // const handleAnalyze = useCallback(() => {
+  //   void analyzeCurrentPost();
+  // }, [isAnalyzing]);
+  // const handleRun = useCallback(() => {
+  //   void run();
+  // }, []);
+  // const handleStop = useCallback(() => {
+  //   state.stopped = true;
+  //   setRenderToggle((v) => !v);
+  // }, []);
+  const handleToggleSemi = useCallback(() => {
+    state.semiAuto = !state.semiAuto;
+    setRenderToggle((v) => !v);
+  }, []);
 
   async function engageTweetSemiAuto(
     article: HTMLElement,
@@ -563,6 +583,13 @@ export default function CommentChat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const onSend = useCallback(() => {
+    const trimmed = input.trim();
+    if (!trimmed || loading) return;
+    void (async () => {
+      await sendMessage(trimmed);
+    })();
+  }, [input, loading]);
 
   // Seed chat with a random suggested reply when analysis arrives
   // this needs to be FIXED
@@ -600,7 +627,7 @@ export default function CommentChat() {
     if (!actionRow) return;
 
     const btn = document.createElement("button");
-    btn.textContent = "Analyze";
+    btn.textContent = "Append text of post to chat";
     btn.className = ANALYZE_BTN_CLASS;
     Object.assign(btn.style, {
       marginLeft: "8px",
@@ -707,86 +734,73 @@ export default function CommentChat() {
     }
   };
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      void sendMessage(input);
-    }
-  };
+  const textareaStyle: React.CSSProperties = {
+    ...inputStyle,
+    minHeight: 44,
+    maxHeight: 160,
+    resize: "vertical",
+  } as const;
 
   return (
     <div style={panelStyle} id="ta-chat">
-      {/* Header */}
       <div style={headerStyle}>
-        <strong>Comment Assistant</strong>
+        <div style={headerTitle}>Comment Coach</div>
       </div>
 
       {/* Controls */}
       <div style={controlsRow}>
-        <button
-          onClick={gotoPrev}
-          id="twitter-agent-btn-prev"
-          className="px-4 py-2 rounded-md bg-slate-600 text-white shadow hover:bg-slate-700 transition"
-        >
-          Prev
-        </button>
-
-        <button
-          onClick={gotoNextPost}
-          id="twitter-agent-btn-next"
-          className="px-4 py-2 rounded-md bg-slate-600 text-white shadow hover:bg-slate-700 transition"
-        >
-          Next
-        </button>
-
-        <button
-          onClick={analyzeCurrentPost}
-          id="twitter-agent-btn-analyze"
-          className="flex items-center gap-2 px-4 py-2 rounded-md bg-teal-500 text-white shadow hover:bg-teal-600 transition disabled:opacity-50"
-          disabled={isAnalyzing}
-        >
-          <span>Analyze</span>
-          {isAnalyzing && <Spinner />}
-        </button>
+        {/* Navigation + Analyze */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "center" }}>
+          <div style={btnGroup}>
+            <ArrowButton title="Previous post" direction="up" onClick={gotoPrev} style={btnArrow} />
+            <ArrowButton
+              title="Next post"
+              direction="down"
+              onClick={gotoNextPost}
+              style={btnArrow}
+            />
+            <button onClick={analyzeCurrentPost} style={btnInfo} disabled={isAnalyzing}>
+              {isAnalyzing ? <Spinner /> : "Analyze"}
+            </button>
+          </div>
+          <div style={hintStyle}>Analyze = check only current post</div>
+        </div>
       </div>
+
+      {/* Right: run/stop */}
+
       <div>
-        {/* ==================  UI AUTO AND SEMI AUTO  ======================== */}
-        <div>
-          {/* Toggle Semi-auto */}
-          <button
-            onClick={() => {
-              state.semiAuto = !state.semiAuto;
-              setRenderToggle((v) => !v); // force re-render
-            }}
-            className={`p-2.5 rounded-md shadow-md text-white border-none cursor-pointer ${
-              state.semiAuto ? "bg-emerald-500" : "bg-slate-500"
-            }`}
-          >
-            Semi-auto: {state.semiAuto ? "ON" : "OFF"}
-          </button>
-
-          {/* Run Button */}
-          <button
-            onClick={() => run()}
-            id="twitter-agent-btn-start"
-            className="p-2.5 rounded-md shadow-md text-white border-none cursor-pointer bg-[#1DA1F2]"
-          >
-            Run
-          </button>
-
-          {/* Stop Button */}
-          <button
-            onClick={() => {
-              state.stopped = true;
-            }}
-            id="twitter-agent-btn-stop"
-            className="p-2.5 rounded-md shadow-md text-white border-none cursor-pointer bg-[#e11d48]"
-          >
-            Stop
-          </button>
+        <div style={controlsRow}>
+          {/* Semi-auto + Run/Stop */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={btnGroup}>
+              <button onClick={run} style={btnPrimary}>
+                Run
+              </button>
+              <button
+                onClick={() => {
+                  state.stopped = true;
+                }}
+                style={btnDanger}
+              >
+                Stop
+              </button>
+              <ToggleSwitch
+                checked={state.semiAuto}
+                onToggle={handleToggleSemi}
+                label="Confirm replies"
+              />
+            </div>
+            <div style={hintStyle}>
+              Run = start auto-replying
+              <br />
+              Stop = end process
+              <br />
+              Confirm replies = approve every comment first before posting
+            </div>
+          </div>
         </div>
 
-        {/* ==================  UI AUTO AND SEMI AUTO  ======================== */}
         {approvalVisible && (
           <CommentApprovalOverlay
             initial={approvalInitialText}
@@ -827,16 +841,9 @@ export default function CommentChat() {
           <>
             {/* System prompt (optional visibility) */}
             <div style={promptBoxStyle}>
-              <p style={{ marginTop: 5 }}>You are helping a user refine a Twitter comment.</p>
-
-              <p style={{ marginTop: 15 }}>
-                <i>System message:</i>
+              <p style={{ marginTop: 5 }}>
+                Type your comment idea or ask for a variant, and I’ll suggest a concise reply.
               </p>
-              <ul style={{ paddingLeft: "20px", marginTop: 10 }}>
-                <li>Keep replies casual, concise (&lt;220 chars).</li>
-                <li>Ask clarifying questions if needed.</li>
-              </ul>
-
               <p style={{ marginTop: 15 }}>
                 <i>Post content:</i>
               </p>
@@ -900,7 +907,6 @@ export default function CommentChat() {
                           background: bg,
                           border: `1px solid ${color}20`,
                           padding: "10px 12px",
-                          borderRadius: 8,
                           display: "flex",
                           flexDirection: "column",
                           gap: 6,
@@ -972,183 +978,29 @@ export default function CommentChat() {
         ) : (
           <>
             {/* Analysis UI */}
-            <div style={sectionStyle}>
-              <div style={headerRow}>
-                <h2 style={{ fontWeight: 800, color: "#111827" }}>Post Analysis</h2>
-                <div>
-                  <span style={badge("#0ea5e9", post_kind?.toUpperCase() || "UNKNOWN")} />
-                  <span style={badge("#10b981", language || "auto")} />
-                  <span style={badge("#6366f1", `confidence: ${confidence || "medium"}`)} />
-                  {is_truncated && <span style={badge("#f59e0b", "truncated")} />}
-                </div>
-              </div>
-
-              {/* Author */}
-              <div style={{ marginTop: 8 }}>
-                <div style={labelStyle}>Author</div>
-                <div style={textBox}>
-                  <strong>{author_name || "Unknown"}</strong>{" "}
-                  <span style={{ color: "#6b7280" }}>{author_handle || ""}</span>
-                </div>
-              </div>
-
-              {/* Tweet text */}
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Tweet Text (exact)</div>
-                <div
-                  style={{
-                    ...textBox,
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  }}
-                >
-                  {tweet_text || "—"}
-                </div>
-                <div style={{ ...subtle, marginTop: 6 }}>
-                  Kind: <strong>{post_kind}</strong> · Truncated:{" "}
-                  <strong>{String(!!is_truncated)}</strong>
-                </div>
-              </div>
-
-              {/* Media + OCR */}
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Media Description</div>
-                <div style={textBox}>{media_description || "—"}</div>
-              </div>
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Image Text (OCR)</div>
-                <div style={textBox}>{image_text || "none"}</div>
-              </div>
-
-              {/* Relationships / Subtext */}
-              <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-                <div>
-                  <div style={labelStyle}>Relationships</div>
-                  <div style={textBox}>{relationships || "—"}</div>
-                </div>
-                <div>
-                  <div style={labelStyle}>Hidden / Subtext</div>
-                  <div style={{ ...textBox, background: "#fff7ed", borderColor: "#fed7aa" }}>
-                    {hidden_or_subtext || "none"}
-                  </div>
-                </div>
-              </div>
-
-              {/* Intent / Tone / Audience */}
-              <div
-                style={{
-                  marginTop: 10,
-                  display: "grid",
-                  gap: 10,
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                }}
-              >
-                <div>
-                  <div style={labelStyle}>Author Intent</div>
-                  <div style={textBox}>{author_intent || "—"}</div>
-                </div>
-                <div>
-                  <div style={labelStyle}>Author Tone</div>
-                  <div style={textBox}>{author_tone || "—"}</div>
-                </div>
-                <div>
-                  <div style={labelStyle}>Audience</div>
-                  <div style={textBox}>{audience || "—"}</div>
-                </div>
-              </div>
-
-              {/* Context / Why now / Risks */}
-              <div
-                style={{
-                  marginTop: 10,
-                  display: "grid",
-                  gap: 10,
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                }}
-              >
-                <div>
-                  <div style={labelStyle}>Context / Background</div>
-                  <div style={textBox}>{context_or_background || "none"}</div>
-                </div>
-                <div>
-                  <div style={labelStyle}>Why Now</div>
-                  <div style={textBox}>{why_now || "unclear"}</div>
-                </div>
-                <div>
-                  <div style={labelStyle}>Risks to Avoid</div>
-                  <div style={{ ...textBox, background: "#fee2e2", borderColor: "#fecaca" }}>
-                    {risks_to_avoid || "—"}
-                  </div>
-                </div>
-              </div>
-
-              {/* Takeaway */}
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Takeaway</div>
-                <div style={{ ...textBox, background: "#ecfeff", borderColor: "#bae6fd" }}>
-                  {takeaway || "—"}
-                </div>
-              </div>
-
-              {/* Key ideas */}
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Key Ideas</div>
-                {Array.isArray(key_ideas) && key_ideas.length ? (
-                  <ul style={listStyle}>
-                    {key_ideas.slice(0, 3).map((k, i) => (
-                      <li key={i}>• {k}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div style={textBox}>—</div>
-                )}
-              </div>
-
-              {/* Conversation hooks */}
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Conversation Hooks</div>
-                <div>
-                  {(conversation_hooks || []).slice(0, 6).map((h: string, i: number) => (
-                    <span key={i} style={pillStyle}>
-                      {h}
-                    </span>
-                  ))}
-                  {(!conversation_hooks || conversation_hooks.length === 0) && (
-                    <div style={textBox}>—</div>
-                  )}
-                </div>
-              </div>
-
-              {/* Suggested replies */}
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Suggested Reply</div>
-                <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr" }}>
-                  <div style={{ ...textBox, background: "#f0fdf4", borderColor: "#bbf7d0" }}>
-                    <div
-                      style={{ fontSize: 12, fontWeight: 700, color: "#166534", marginBottom: 6 }}
-                    >
-                      Short
-                    </div>
-                    {suggested_reply?.short || "—"}
-                  </div>
-                  <div style={{ ...textBox, background: "#f0f9ff", borderColor: "#bae6fd" }}>
-                    <div
-                      style={{ fontSize: 12, fontWeight: 700, color: "#075985", marginBottom: 6 }}
-                    >
-                      Question
-                    </div>
-                    {suggested_reply?.question || "—"}
-                  </div>
-                  <div style={{ ...textBox, background: "#faf5ff", borderColor: "#e9d5ff" }}>
-                    <div
-                      style={{ fontSize: 12, fontWeight: 700, color: "#6b21a8", marginBottom: 6 }}
-                    >
-                      Value Add
-                    </div>
-                    {suggested_reply?.value_add || "—"}
-                  </div>
-                </div>
-              </div>
-            </div>
+            <PostAnalysis
+              post_kind={post_kind}
+              is_truncated={is_truncated}
+              language={language}
+              author_name={author_name}
+              author_handle={author_handle}
+              tweet_text={tweet_text}
+              media_description={media_description}
+              image_text={image_text}
+              relationships={relationships}
+              hidden_or_subtext={hidden_or_subtext}
+              author_intent={author_intent}
+              author_tone={author_tone}
+              audience={audience}
+              context_or_background={context_or_background}
+              why_now={why_now}
+              risks_to_avoid={risks_to_avoid}
+              takeaway={takeaway}
+              key_ideas={key_ideas}
+              conversation_hooks={conversation_hooks}
+              suggested_reply={suggested_reply}
+              confidence={confidence}
+            />
           </>
         )}
       </div>
@@ -1156,21 +1008,18 @@ export default function CommentChat() {
       {/* Input only for Chat tab */}
       {activeTab === "chat" && (
         <div style={inputRowStyle}>
-          <input
-            type="text"
-            placeholder="Reply or ask for a variant…"
+          <ChatTextarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            style={inputStyle}
-          />
-          <button
-            onClick={() => void sendMessage(input)}
+            onChange={setInput}
+            onSend={onSend}
+            style={textareaStyle}
+            buttonStyle={{
+              ...sendBtnStyle,
+              alignSelf: "flex-end",
+              opacity: loading || !input.trim() ? 0.6 : 1,
+            }}
             disabled={loading || !input.trim()}
-            style={{ ...sendBtnStyle, opacity: loading || !input.trim() ? 0.6 : 1 }}
-          >
-            Send
-          </button>
+          />
         </div>
       )}
     </div>
