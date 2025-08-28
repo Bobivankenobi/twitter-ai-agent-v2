@@ -1,14 +1,21 @@
+import { CONFIG } from "./constants";
+import { State } from "./types";
+
 // --- tiny utils ---
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-export const waitFor = <T>(fn: () => T | null | undefined, timeout: number = 6000, every: number = 100): Promise<T> =>
+export const waitFor = <T>(
+  fn: () => T | null | undefined,
+  timeout: number = 6000,
+  every: number = 100
+): Promise<T> =>
   new Promise((res, rej) => {
     const t0 = performance.now();
     (function poll() {
       try {
         const v = fn();
         if (v) return res(v);
-        if (performance.now() - t0 >= timeout) return rej(new Error('waitFor timeout'));
+        if (performance.now() - t0 >= timeout) return rej(new Error("waitFor timeout"));
         setTimeout(poll, every);
       } catch (e) {
         rej(e);
@@ -16,12 +23,16 @@ export const waitFor = <T>(fn: () => T | null | undefined, timeout: number = 600
     })();
   });
 
-export const waitForDisappear = (el: HTMLElement, timeout: number = 8000, every: number = 120): Promise<boolean> =>
+export const waitForDisappear = (
+  el: HTMLElement,
+  timeout: number = 8000,
+  every: number = 120
+): Promise<boolean> =>
   new Promise((res, rej) => {
     const t0 = performance.now();
     (function poll() {
       if (!document.body.contains(el)) return res(true);
-      if (performance.now() - t0 >= timeout) return rej(new Error('waitForDisappear timeout'));
+      if (performance.now() - t0 >= timeout) return rej(new Error("waitForDisappear timeout"));
       setTimeout(poll, every);
     })();
   });
@@ -32,28 +43,30 @@ export const waitForDisappear = (el: HTMLElement, timeout: number = 8000, every:
 
 // Example: "Girişmen !!! " → "girismen"
 const norm = (s: string): string => {
-  return s
-    .toLowerCase() // 1. Convert all letters to lowercase for case-insensitive comparison
+  return (
+    s
+      .toLowerCase() // 1. Convert all letters to lowercase for case-insensitive comparison
 
-    // 2. Normalize Unicode text to "NFKD" form:
-    //    - Decomposes accented characters into base + diacritic mark
-    //    Example: "ş" → "s" + "◌̧"
-    .normalize('NFKD')
+      // 2. Normalize Unicode text to "NFKD" form:
+      //    - Decomposes accented characters into base + diacritic mark
+      //    Example: "ş" → "s" + "◌̧"
+      .normalize("NFKD")
 
-    // 3. Remove diacritic marks (accents) from characters
-    //    - Unicode range \u0300–\u036f covers combining diacritical marks
-    .replace(/[\u0300-\u036f]/g, '')
+      // 3. Remove diacritic marks (accents) from characters
+      //    - Unicode range \u0300–\u036f covers combining diacritical marks
+      .replace(/[\u0300-\u036f]/g, "")
 
-    // 4. Remove most punctuation and special symbols, keep only:
-    //    - Letters (\p{L}), Numbers (\p{N}), and Spaces (\s)
-    //    Everything else is replaced with a space
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      // 4. Remove most punctuation and special symbols, keep only:
+      //    - Letters (\p{L}), Numbers (\p{N}), and Spaces (\s)
+      //    Everything else is replaced with a space
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
 
-    // 5. Replace multiple spaces/tabs/newlines with a single space
-    .replace(/\s+/g, ' ')
+      // 5. Replace multiple spaces/tabs/newlines with a single space
+      .replace(/\s+/g, " ")
 
-    // 6. Trim leading and trailing spaces
-    .trim();
+      // 6. Trim leading and trailing spaces
+      .trim()
+  );
 };
 
 // Convert a string into a set of tokens (words) for easier matching
@@ -64,7 +77,7 @@ const norm = (s: string): string => {
 export const toTokenSet = (s: string): Set<string> => {
   return new Set(
     norm(s) // normalize text
-      .split(' ') // split into tokens
+      .split(" ") // split into tokens
       .filter((t) => t.length >= 3) // keep words with 3+ characters
   );
 };
@@ -78,11 +91,11 @@ export const isVisible = (el: HTMLElement): boolean => {
   const r = el.getBoundingClientRect();
   return (
     r.height > 0 && // element has height
-    r.width > 0 &&  // element has width
+    r.width > 0 && // element has width
     r.bottom > 0 && // bottom is below top edge of viewport
-    r.right > 0 &&  // right is right of left edge of viewport
+    r.right > 0 && // right is right of left edge of viewport
     r.top < (window.innerHeight || document.documentElement.clientHeight) && // top is above bottom edge of viewport
-    r.left < (window.innerWidth || document.documentElement.clientWidth)     // left is left of right edge of viewport
+    r.left < (window.innerWidth || document.documentElement.clientWidth) // left is left of right edge of viewport
   );
 };
 
@@ -117,4 +130,23 @@ export async function waitForDialogClose(timeoutMs = 10000): Promise<boolean> {
     await sleep(120);
   }
   return false;
+}
+
+export function loadRepliedFromStorage(state: State): void {
+  try {
+    const raw = localStorage.getItem(CONFIG.persistKey);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) arr.forEach((id) => state.repliedIds.add(id));
+  } catch {
+    /* empty */
+  }
+}
+
+export function saveRepliedToStorage(state: State): void {
+  try {
+    localStorage.setItem(CONFIG.persistKey, JSON.stringify([...state.repliedIds]));
+  } catch {
+    /* empty */
+  }
 }

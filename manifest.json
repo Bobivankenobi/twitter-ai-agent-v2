@@ -16,8 +16,8 @@
   },
   "icons": {},
   "background": {
-  "service_worker": "content-script/src/background.js"
-},
+    "service_worker": "content-script/src/background.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://twitter.com/*", "https://x.com/*"],
@@ -32,5 +32,3 @@
     }
   ]
 }
-
-

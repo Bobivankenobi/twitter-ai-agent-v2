@@ -7,11 +7,13 @@ This project demonstrates how to build a Chrome Extension using React and TypeSc
 ## Setup
 
 ### Clone repository
+
 ```sh
 git clone git@github.com:yosevu/react-content-script.git
 ```
 
 ### Install dependencies
+
 ```sh
 yarn
 ```
@@ -58,7 +60,7 @@ The content script source code is in the `content-script` directory.
 
 ## Background
 
-This repository was originally part of [How to inject a React app into a Chrome Extension as a Content Script](https://medium.com/@yosevu/how-to-inject-a-react-app-into-a-chrome-extension-as-a-content-script-3a038f611067). 
+This repository was originally part of [How to inject a React app into a Chrome Extension as a Content Script](https://medium.com/@yosevu/how-to-inject-a-react-app-into-a-chrome-extension-as-a-content-script-3a038f611067).
 
 ## License
 

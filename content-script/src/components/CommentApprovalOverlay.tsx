@@ -9,7 +9,7 @@ interface Props {
   onStop: () => void;
 }
 
-export default function CommentApprovalOverlay({ initial, onApprove, onSkip, onStop }: Props) {
+export default function CommentApprovalOverlay({ onApprove, onSkip, onStop }: Props) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onSkip();
@@ -27,20 +27,6 @@ export default function CommentApprovalOverlay({ initial, onApprove, onSkip, onS
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-        {/* <button
-          onClick={onApprove}
-          style={{
-            flex: 1,
-            background: "#10b981",
-            color: "#fff",
-            border: "none",
-            padding: "8px 10px",
-            borderRadius: 8,
-            cursor: "pointer",
-          }}
-        >
-          approve (ctrl/⌘+enter)
-        </button> */}
         <button
           onClick={onSkip}
           style={{
