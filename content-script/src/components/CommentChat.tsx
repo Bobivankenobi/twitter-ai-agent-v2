@@ -546,21 +546,60 @@ export default function CommentChat() {
     confidence,
   } = analyzedPostData as AnalyzedPost;
 
+  // function handleAcceptSuggestion(text: string) {
+  //   const analyzed = analyzedPostData as AnalyzedPost;
+  //   const tweetText = analyzed?.tweet_text;
+  //   if (!tweetText) return alert("No analyzed tweet text found.");
+
+  //   let hit = findTweetByText(tweetText, {
+  //     minScore: CONFIG.minMatchScore,
+  //     onlyViewport: true,
+  //   });
+
+  //   if (!hit?.article?.isConnected) {
+  //     hit = findTweetByText(tweetText, {
+  //       minScore: CONFIG.minMatchScore,
+  //       onlyViewport: false,
+  //     });
+  //   }
+
+  //   if (!hit?.article) {
+  //     return alert("Could not find matching tweet on page.");
+  //   }
+
+  //   engageTweet(hit.article, text)
+  //     .then((ok) => {
+  //       approvalPromiseRef.current?.("approve");
+  //       setApprovalVisible(false);
+  //       if (!ok) alert("Failed to reply to tweet.");
+  //     })
+  //     .catch((err) => {
+  //       console.error("Error engaging tweet:", err);
+  //       alert("Something went wrong while replying.");
+  //     });
+  // }
+
   function handleAcceptSuggestion(text: string) {
     const analyzed = analyzedPostData as AnalyzedPost;
     const tweetText = analyzed?.tweet_text;
     if (!tweetText) return alert("No analyzed tweet text found.");
 
-    let hit = findTweetByText(tweetText, {
-      minScore: CONFIG.minMatchScore,
-      onlyViewport: true,
-    });
-
+    // 1) fuzzy find (viewport → full page)
+    let hit = findTweetByText(tweetText, { minScore: CONFIG.minMatchScore, onlyViewport: true });
     if (!hit?.article?.isConnected) {
-      hit = findTweetByText(tweetText, {
-        minScore: CONFIG.minMatchScore,
-        onlyViewport: false,
-      });
+      hit = findTweetByText(tweetText, { minScore: CONFIG.minMatchScore, onlyViewport: false });
+    }
+
+    // 2) fallback: use currently selected article if text matches closely
+    if (!hit?.article && state.currentArticle) {
+      const currentText = extractTweetText(state.currentArticle);
+      if (
+        currentText &&
+        tweetText &&
+        currentText.includes(tweetText.slice(0, Math.min(40, tweetText.length)))
+      ) {
+        hit = { article: state.currentArticle } as unknown as FindTweetHit | null;
+      }
     }
 
     if (!hit?.article) {
@@ -613,6 +652,28 @@ export default function CommentChat() {
 
   const ANALYZE_BTN_CLASS = "ca-analyze-btn";
 
+  function hydrateAnalysisFromArticle(article: HTMLElement) {
+    const t = extractTweetText(article);
+    // you can grab more fields if you want
+    const authorName =
+      (article.querySelector('[data-testid="User-Name"] a') as HTMLElement | null)?.textContent ||
+      "";
+    const authorHandleRaw =
+      (article.querySelector('a[href*="/status/"]') as HTMLAnchorElement | null)?.pathname
+        ?.split("/")
+        ?.filter(Boolean)[0] || "";
+    const authorHandle = authorHandleRaw ? `@${authorHandleRaw}` : "";
+
+    // append this tweet’s text into analyzedPostData so Accept can fuzzy-find
+    setAnalyzedPostData((prev) => ({
+      ...prev,
+      tweet_text: t, // <-- key bit: make Accept work
+      author_name: authorName,
+      author_handle: authorHandle,
+      post_kind: (prev as AnalyzedPost)?.post_kind ?? "original",
+    }));
+  }
+
   function attachAnalyzeButtonToArticle(
     article: HTMLElement,
     setInputCb: (v: string) => void,
@@ -653,6 +714,8 @@ export default function CommentChat() {
         setInputCb(`create comment for this post:\n${tweetText}`);
       }
 
+      // 2) ALSO hydrate analyzedPostData.tweet_text so Accept can fuzzy-find
+      hydrateAnalysisFromArticle(article);
       // 2) (optional) still run your analysis pipeline
       // await analyzeCurrentPost();
     });
